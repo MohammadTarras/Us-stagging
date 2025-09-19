@@ -1249,7 +1249,7 @@ def main():
     with tab1:
         # Header
     
-        st.markdown('<h1 class="main-header">📅 Our Events. MOEEEEWWD</h1>', unsafe_allow_html=True)
+        st.markdown('<h1 class="main-header">📅 Our Events. MOHAMMAD</h1>', unsafe_allow_html=True)
         
         # Action buttons
         st.markdown('<div class="action-buttons">', unsafe_allow_html=True)
