@@ -8,7 +8,7 @@ import re
 import secrets
 import regex
 import plotly.express as px
-
+import traceback
 from functools import wraps
 
 # Define custom colors
@@ -22,7 +22,7 @@ st.set_page_config(
     page_title="JUST US",
     page_icon="🕵️‍♀️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # Supabase configuration
@@ -87,7 +87,6 @@ def save_session_token(username, token):
     except Exception as e:
         st.error(f"Session error: Please try logging in again.")
         return False
-
 
 def verify_session_token(token):
     """Verify session token and return user data with optimized caching"""
@@ -163,9 +162,10 @@ def load_events_from_db(username):
     try:
         supabase = init_supabase()
         set_user_context(username)
-        
+        print("setted user context....")
         response = supabase.table('our_events').select('*').eq('enabled', True).order('event_date', desc=True).execute()
-        
+        print(len(response.data))
+    
         events = []
         for event in response.data:
             events.append({
@@ -180,14 +180,24 @@ def load_events_from_db(username):
         st.error(f"Error loading events: {str(e)}")
         return []
 
+# Enhanced clear_events_cache function
 def clear_events_cache():
-    """Clear events cache when data is modified"""
+    """Clear events cache when data is modified and reset pagination state"""
     # Clear the specific cache
     load_events_from_db.clear()
-    # Also clear any related session state cache
+    
+    # Clear any related session state cache
     keys_to_remove = [k for k in st.session_state.keys() if k.startswith("db_load_events")]
     for key in keys_to_remove:
         del st.session_state[key]
+    
+    # Reset pagination state when events are modified
+    if 'selected_event' in st.session_state:
+        st.session_state.selected_event = None
+    if 'edit_event_id' in st.session_state:
+        st.session_state.edit_event_id = None
+    if 'event_page' in st.session_state:
+        st.session_state.event_page = 0
 
 def save_event_to_db(title, event_date, preview, description, username):
     """Save new event to Supabase database with cache invalidation"""
@@ -283,6 +293,7 @@ def authenticate_user(username, password):
         return False, None
     except Exception:
         st.error("Authentication error. Please try again.")
+        traceback.print_exc()
         return False, None
 
 def logout():
@@ -321,16 +332,26 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@300;400;600;700&display=swap');
     
+    /* Base styles - optimized for both desktop and mobile */
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        max-width: 100%;
+    }
+    
+    /* Main header - responsive typography */
     .main-header {
         text-align: center;
         color: #2c3e50;
-        font-size: 3rem;
+        font-size: clamp(2rem, 5vw, 3.5rem);
         font-weight: 700;
-        margin-bottom: 1rem;
+        margin-bottom: 1.5rem;
         text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
         font-family: 'Cairo', sans-serif;
+        line-height: 1.2;
     }
     
+    /* Action buttons - improved responsive layout */
     .action-buttons {
         display: flex;
         justify-content: center;
@@ -339,32 +360,34 @@ st.markdown("""
         flex-wrap: wrap;
     }
     
+    /* Login container - responsive design */
     .login-container {
-        max-width: 400px;
+        max-width: min(400px, 90vw);
         margin: 2rem auto;
-        padding: 3rem;
+        padding: clamp(2rem, 5vw, 3rem);
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         border-radius: 20px;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        box-shadow: 0 20px 40px rgba(0,0,0,0.15);
         color: white;
         text-align: center;
     }
     
     .login-header {
-        font-size: 2.5rem;
+        font-size: clamp(2rem, 4vw, 2.5rem);
         font-weight: bold;
         margin-bottom: 2rem;
         font-family: 'Cairo', sans-serif;
     }
     
+    /* Event cards - improved mobile layout */
     .event-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         border-radius: 15px;
-        padding: 1.5rem;
+        padding: clamp(1rem, 3vw, 1.5rem);
         margin-bottom: 1rem;
         box-shadow: 0 8px 25px rgba(0,0,0,0.15);
         color: white;
-        transition: transform 0.2s ease;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
         border: none;
         position: relative;
         overflow: hidden;
@@ -372,68 +395,77 @@ st.markdown("""
     
     .event-card:hover {
         transform: translateY(-2px);
+        box-shadow: 0 12px 35px rgba(0,0,0,0.2);
     }
     
     .card-title {
-        font-size: 1.4rem;
+        font-size: clamp(1.1rem, 2.5vw, 1.4rem);
         font-weight: bold;
         margin-bottom: 0.8rem;
         text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
         font-family: 'Cairo', sans-serif;
         line-height: 1.3;
+        word-wrap: break-word;
     }
     
     .card-date {
-        font-size: 0.9rem;
+        font-size: clamp(0.8rem, 2vw, 0.9rem);
         margin-bottom: 0.8rem;
         opacity: 0.9;
         font-family: 'Cairo', sans-serif;
         display: flex;
         align-items: center;
         gap: 0.5rem;
+        flex-wrap: wrap;
     }
     
     .card-preview {
-        font-size: 0.95rem;
+        font-size: clamp(0.85rem, 2vw, 0.95rem);
         opacity: 0.9;
         line-height: 1.4;
         font-family: 'Cairo', sans-serif;
         margin-bottom: 1rem;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
     
+    /* Event detail container - responsive */
     .event-detail-container {
         max-width: 100%;
         margin: 0 auto;
-        padding: 1rem;
+        padding: clamp(0.5rem, 2vw, 1rem);
     }
     
     .event-detail-card {
         background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        border-radius: 25px;
-        padding: 2rem;
+        border-radius: clamp(15px, 3vw, 25px);
+        padding: clamp(1rem, 4vw, 2rem);
         margin: 1rem 0;
         box-shadow: 0 20px 40px rgba(0,0,0,0.1);
         color: #2c3e50;
         position: relative;
         overflow: hidden;
         width: 100%;
+        box-sizing: border-box;
     }
     
     .event-detail-title {
         color: #2c3e50;
-        font-size: 2.5rem;
+        font-size: clamp(1.5rem, 4vw, 2.5rem);
         font-weight: bold;
         margin-bottom: 1.5rem;
         text-align: center;
         font-family: 'Cairo', sans-serif;
         position: relative;
         z-index: 1;
+        line-height: 1.2;
+        word-wrap: break-word;
     }
     
     .event-detail-meta {
         text-align: center;
         color: #7f8c8d;
-        font-size: 1.2rem;
+        font-size: clamp(1rem, 2.5vw, 1.2rem);
         margin-bottom: 2rem;
         font-style: italic;
         font-family: 'Cairo', sans-serif;
@@ -442,20 +474,22 @@ st.markdown("""
     }
     
     .event-description {
-        font-size: 1.2rem;
+        font-size: clamp(1rem, 2.2vw, 1.2rem);
         line-height: 1.8;
         color: #2c3e50;
         font-family: 'Amiri', 'Cairo', serif;
         position: relative;
         z-index: 1;
         background: rgba(255, 255, 255, 0.7);
-        padding: 2rem;
+        padding: clamp(1rem, 3vw, 2rem);
         border-radius: 15px;
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.3);
         width: 100%;
         box-sizing: border-box;
         text-align: justify;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
     
     .event-description.arabic {
@@ -464,111 +498,127 @@ st.markdown("""
         font-family: 'Amiri', 'Cairo', serif;
     }
     
+    /* No events message */
     .no-events {
         text-align: center;
-        padding: 4rem 2rem;
+        padding: clamp(2rem, 6vw, 4rem) 2rem;
         color: #7f8c8d;
         font-family: 'Cairo', sans-serif;
     }
     
     .no-events h2 {
-        font-size: 2rem;
+        font-size: clamp(1.5rem, 3vw, 2rem);
         margin-bottom: 1rem;
     }
     
     .no-events p {
-        font-size: 1.1rem;
+        font-size: clamp(1rem, 2vw, 1.1rem);
         opacity: 0.8;
     }
     
+    /* User info - responsive */
     .user-info {
         background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
         color: white;
-        padding: 1rem;
+        padding: clamp(0.8rem, 2vw, 1rem);
         border-radius: 10px;
         margin-bottom: 1rem;
         text-align: center;
         font-family: 'Cairo', sans-serif;
+        font-size: clamp(0.9rem, 2vw, 1rem);
     }
     
+    /* Event form - responsive */
     .event-form {
         background: #f8f9fa;
-        padding: 2rem;
+        padding: clamp(1rem, 3vw, 2rem);
         border-radius: 15px;
         margin: 1rem 0;
         border: 1px solid #dee2e6;
+        box-sizing: border-box;
+        width: 100%;
     }
     
     .form-header {
         text-align: center;
         color: #2c3e50;
-        font-size: 1.8rem;
+        font-size: clamp(1.3rem, 3vw, 1.8rem);
         font-weight: bold;
         margin-bottom: 1.5rem;
         font-family: 'Cairo', sans-serif;
     }
     
-    @media (max-width: 768px) {
-        .main-header {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
+    /* Navigation sidebar styles */
+    .css-1d391kg {
+        background-color: #f0f2f6;
+    }
+    
+    .css-1lcbmhc {
+        color: #2c3e50;
+        font-weight: 600;
+    }
+    
+    /* Page indicator */
+    .page-indicator {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 0.8rem;
+        border-radius: 10px;
+        text-align: center;
+        font-weight: bold;
+        margin-bottom: 1rem;
+    }
+    
+    /* Additional responsive improvements */
+    .stButton button {
+        width: 100%;
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        font-size: clamp(0.85rem, 2vw, 0.95rem);
+        font-weight: 500;
+        transition: all 0.2s ease;
+    }
+    
+    .stButton button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    /* Sidebar radio buttons */
+    .stRadio > div {
+        background-color: white;
+        border-radius: 10px;
+        padding: 1rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    /* Mobile-first breakpoints */
+    @media (max-width: 480px) {
+        .main .block-container {
+            padding: 1rem 0.5rem;
         }
         
         .action-buttons {
             flex-direction: column;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        
-        .event-detail-container {
-            padding: 0.5rem;
-        }
-        
-        .event-detail-card {
-            padding: 1.5rem;
-            margin: 0.5rem 0;
-            border-radius: 15px;
-        }
-        
-        .event-detail-title {
-            font-size: 1.8rem;
-            line-height: 1.2;
-        }
-        
-        .event-description {
-            font-size: 1.1rem;
-            line-height: 1.6;
-            padding: 1.5rem;
+            align-items: stretch;
+            gap: 0.8rem;
+            margin: 1.5rem 0;
         }
         
         .event-card {
-            padding: 1.2rem;
+            margin-bottom: 1.5rem;
         }
         
         .login-container {
             margin: 1rem 0.5rem;
-            padding: 2rem 1.5rem;
-            width: calc(100% - 1rem);
-            box-sizing: border-box;
-        }
-    }
-    
-    @media (max-width: 480px) {
-        .main-header {
-            font-size: 1.8rem;
+            border-radius: 15px;
         }
         
-        .event-detail-title {
-            font-size: 1.5rem;
-        }
-        
-        .event-description {
-            font-size: 1rem;
-            padding: 1rem;
+        .stColumn {
+            margin-bottom: 1rem;
         }
         
         .event-form {
-            padding: 1rem;
             margin: 0.5rem 0;
         }
     }
@@ -583,7 +633,8 @@ def initialize_session_state():
         'selected_event': None,
         'show_add_form': False,
         'edit_event_id': None,
-        'last_cache_clear': time.time()  # Track cache clearing
+        'last_cache_clear': time.time(),  # Track cache clearing
+        'current_page': 'Events'  # Track current page
     }
     
     for key, default_value in defaults.items():
@@ -713,7 +764,6 @@ def edit_event_form(event):
         if delete_clicked:
             if st.checkbox("Confirm deletion (this cannot be undone)", key="confirm_delete"):
                 with st.spinner("Deleting event..."):
-                    
                     success = delete_event_from_db(event['id'], st.session_state.user['username'])
                     if success:
                         st.success("✅ Event deleted successfully!")
@@ -726,14 +776,29 @@ def edit_event_form(event):
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-def create_event_cards(events):
-    """Create event cards with inline edit buttons - optimized"""
+def create_event_cards(events, start_idx=0, events_data=None):
+    """Create event cards with inline edit buttons - FIXED pagination navigation"""
     if not events:
         return
     
+    # Use the full events_data for navigation if provided
+    if events_data is None:
+        events_data = events
+    
     for i, event in enumerate(events):
-        # Pre-format date to avoid repeated formatting
-        formatted_date = event['date'].strftime('%B %d, %Y')
+        # Calculate the actual global index in the full events list
+        global_index = start_idx + i
+        
+        # Validate event data
+        if not all(key in event for key in ['title', 'date', 'preview', 'id']):
+            st.error(f"Event data incomplete for event at index {global_index}")
+            continue
+        
+        # Format date
+        try:
+            formatted_date = event['date'].strftime('%B %d, %Y')
+        except (AttributeError, ValueError):
+            formatted_date = str(event['date'])
         
         card_html = f'''
         <div class="event-card">
@@ -747,16 +812,20 @@ def create_event_cards(events):
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button(f"👁️ View Details", key=f"view_{i}", 
+            # FIXED: Use global index for proper event access
+            view_key = f"view_{event['id']}_{global_index}"
+            if st.button(f"👁️ View Details", key=view_key, 
                         type="secondary", use_container_width=True):
-                st.session_state.selected_event = i
+                st.session_state.selected_event = global_index
                 st.session_state.edit_event_id = None
                 st.rerun()
         
         with col2:
-            if st.button(f"✏️ Edit", key=f"edit_{i}", 
+            # FIXED: Use global index for proper event access
+            edit_key = f"edit_{event['id']}_{global_index}"
+            if st.button(f"✏️ Edit", key=edit_key, 
                         type="secondary", use_container_width=True):
-                st.session_state.selected_event = i
+                st.session_state.selected_event = global_index
                 st.session_state.edit_event_id = event['id']
                 st.rerun()
         
@@ -766,12 +835,8 @@ def create_event_cards(events):
 def read_file_lines(bucket_name: str, file_path: str):
     """Read a file from Supabase storage line by line into a list with caching"""
     try:
-
-        
         supabase = init_supabase_storage()
- 
         response = supabase.storage.from_(bucket_name).download(file_path)
-
 
         if response:
             content = response.decode("utf-8")
@@ -952,7 +1017,7 @@ def process_chat_data(df, start_date=None, end_date=None, aggregation_period='W'
         period_name = "MonthStart"
     else:
         raise ValueError("aggregation_period must be 'D', 'W', or 'M'")
-    print("aggregating cols....")
+    
     # Define aggregation columns
     agg_columns = {
         "Message Count": "sum" if "Message Count" in df.columns else None,
@@ -967,7 +1032,7 @@ def process_chat_data(df, start_date=None, end_date=None, aggregation_period='W'
     # Group and aggregate data
     processed_df = df.groupby(["Period", "Name"]).agg(agg_columns).reset_index()
     processed_df.rename(columns={"Period": period_name}, inplace=True)
-    print("summary stats....")
+    
     # Calculate summary statistics
     summary_stats = {}
     for col in agg_columns.keys():
@@ -982,7 +1047,6 @@ def process_chat_data(df, start_date=None, end_date=None, aggregation_period='W'
                     "end": df["Date"].max()
                 }
             }
-
     
     return processed_df, summary_stats
 
@@ -1064,16 +1128,11 @@ def create_laugh_metric_cards(laugh_stats):
         person_name = "SHAHED" if person.lower() == "shahed" else person.upper()
         
         with cols[i]:
-            st.markdown(
-                f"""
-                <div style="background-color:#f0f2f6; padding:15px; border-radius:10px; text-align:center; border-left: 4px solid {person_color};">
-                    <span style="font-size:16px; font-weight:bold;">Avg. Laughs {person_name}</span><br>
-                    <span style="font-size:28px; font-weight:bold; color:{person_color};">{stats['average']:.1f}</span><br>
-                    <span style="font-size:12px; color:#666;">Total: {stats['total']}</span>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            st.metric(
+            label=f"Avg. Laughs - {person_name}",
+            value=f"{stats['average']:.1f}",
+            help=f"Total laughs: {stats['total']}"
+        )
 
 @st.cache_data(ttl=300, show_spinner=False)
 def create_trend_visualizations(processed_df, period_column="WeekStart"):
@@ -1128,7 +1187,6 @@ def create_trend_visualizations(processed_df, period_column="WeekStart"):
                 fig.update_yaxes(tickformat=",~s")  # 1k, 2k formatting
             
             st.plotly_chart(fig, use_container_width=True)
-
 def create_metric_cards(summary_stats):
     """Create and display metric cards horizontally"""
 
@@ -1137,42 +1195,22 @@ def create_metric_cards(summary_stats):
         return
 
     # Build metrics list (you already have totals only)
-    metrics = [
-        ("Total Message Count", summary_stats["Message Count"]["total"]),
-        ("Total Word Count", summary_stats["Word Count"]["total"]),
-        ("Total Emoji Count", summary_stats["Emoji Count"]["total"]),
+    metrics_data = [
+        ("Total Messages", summary_stats["Message Count"]["total"], "💬"),
+        ("Total Words", summary_stats["Word Count"]["total"], "📝"),
+        ("Total Emojis", summary_stats["Emoji Count"]["total"], "😀"),
     ]
-
     # Create one row with N columns
-    cols = st.columns(len(metrics), gap="small")
+    cols = st.columns(len(metrics_data), gap="small")
 
-    # Card style
-    card_style = """
-        background-color:#f0f2f6; 
-        padding:10px; 
-        border-radius:8px; 
-        text-align:center; 
-        margin:2px;
-        min-height: 100px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        box-sizing: border-box;
-        width: 100%;
-    """
-
-    # Fill columns left to right
-    for col, (title, value) in zip(cols, metrics):
-        col.markdown(
-            f"""
-            <div style="{card_style} border-left: 4px solid #333;">
-                <div style="font-size:14px; font-weight:bold; color:#333;">{title}</div>
-                <div style="font-size:24px; font-weight:bold; color:#333; margin-top:5px;">{value:,}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
+    for col, (title, value, icon) in zip(cols, metrics_data):
+        with col:
+            st.metric(
+                label=f"{icon} {title}",
+                value=f"{value:,}",
+                help=f"Total {title.lower()} in the selected time period"
+            )
+        
 
 def analyze_chat_data(df, start_date=None, end_date=None, aggregation_period=None):
     """
@@ -1185,7 +1223,7 @@ def analyze_chat_data(df, start_date=None, end_date=None, aggregation_period=Non
     """
     
     # Process the data
-    processed_df, summary_stats = process_chat_data(df, start_date, end_date,aggregation_period)
+    processed_df, summary_stats = process_chat_data(df, start_date, end_date, aggregation_period)
     
     if processed_df.empty:
         st.error("No data available for the selected date range")
@@ -1193,29 +1231,229 @@ def analyze_chat_data(df, start_date=None, end_date=None, aggregation_period=Non
     
     # Create metric cards for different metrics
     st.subheader("📊 Key Metrics")
-
-    create_metric_cards(summary_stats)   # 👈 call ONCE, not in a loop
-    
+    create_metric_cards(summary_stats)
     
     # Create trend visualizations
     st.subheader("📈 Trends Over Time")
-    if aggregation_period=='W':
-        aggregation_period1='WeekStart'
-    elif aggregation_period=='D':
-        aggregation_period1='Day'
-    elif aggregation_period=='M':
-        aggregation_period1='MonthStart'
+    if aggregation_period == 'W':
+        aggregation_period1 = 'WeekStart'
+    elif aggregation_period == 'D':
+        aggregation_period1 = 'Day'
+    elif aggregation_period == 'M':
+        aggregation_period1 = 'MonthStart'
     
     create_trend_visualizations(processed_df, aggregation_period1)
-    
- 
 
-# Main application logic - optimized
-def main():
-    """Main application logic with proper authentication flow and performance optimizations"""
+# Page navigation functions
+def show_events_page():
+    """Display the Events page"""
+    st.markdown('<div class="page-indicator">📅 Our Events</div>', unsafe_allow_html=True)
     
-    # Performance monitoring
-    start = time.time()
+    # Header
+    st.markdown('<h1 class="main-header">📅 Our Events</h1>', unsafe_allow_html=True)
+    
+    # Action buttons
+    st.markdown('<div class="action-buttons">', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col2:  # Center the button
+        if st.button("➕ Add New Event", type="primary", use_container_width=True):
+            st.session_state.show_add_form = True
+            st.session_state.selected_event = None
+            st.session_state.edit_event_id = None
+            st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Number of events per page
+    EVENTS_PER_PAGE = 10  
+
+    # Load events with progress indicator
+    with st.spinner("Loading events..."):
+        events_data = load_events_from_db(st.session_state.user['username'])
+
+    # Initialize pagination state
+    if "event_page" not in st.session_state:
+        st.session_state.event_page = 0
+
+    # Calculate total pages
+    total_events = len(events_data)
+    total_pages = max(1, (total_events + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE)
+
+    # Validate and reset page if necessary
+    if st.session_state.event_page >= total_pages:
+        st.session_state.event_page = max(0, total_pages - 1)
+
+    # Apply pagination
+    start_idx = st.session_state.event_page * EVENTS_PER_PAGE
+    end_idx = start_idx + EVENTS_PER_PAGE
+    page_events = events_data[start_idx:end_idx]
+
+    # Show appropriate content
+    if st.session_state.show_add_form:
+        add_event_form()
+    elif st.session_state.selected_event is not None and st.session_state.selected_event < len(events_data):
+        # Back button
+        if st.button("← Back to Events", type="primary"):
+            # Calculate which page the selected event should be on before clearing it
+            if events_data and st.session_state.selected_event is not None:
+                target_page = st.session_state.selected_event // EVENTS_PER_PAGE
+                st.session_state.event_page = target_page
+            
+            st.session_state.selected_event = None
+            st.session_state.edit_event_id = None
+            st.rerun()
+        
+        event = events_data[st.session_state.selected_event]
+        
+        if st.session_state.edit_event_id == event['id']:
+            edit_event_form(event)
+        else:
+            display_event_details(event)
+    else:
+        # Reset selected_event if it's invalid
+        if st.session_state.selected_event is not None and st.session_state.selected_event >= len(events_data):
+            st.session_state.selected_event = None
+            st.session_state.edit_event_id = None
+        
+        # Events grid view
+        if events_data:
+            st.markdown("---")
+            st.subheader("📅 Your Events Timeline")
+            
+            # Pagination controls at top
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col1:
+                if st.button("⬅️ Prev", disabled=st.session_state.event_page == 0):
+                    st.session_state.event_page -= 1
+                    # Clear selection when changing pages
+                    st.session_state.selected_event = None
+                    st.session_state.edit_event_id = None
+                    st.rerun()
+            with col2:
+                st.markdown(
+                    f"<div style='text-align:center;'>Page {st.session_state.event_page+1} of {total_pages}</div>", 
+                    unsafe_allow_html=True
+                )
+            with col3:
+                if st.button("Next ➡️", disabled=st.session_state.event_page >= total_pages-1):
+                    st.session_state.event_page += 1
+                    # Clear selection when changing pages
+                    st.session_state.selected_event = None
+                    st.session_state.edit_event_id = None
+                    st.rerun()
+            
+            # Render paginated events with FIXED start index and full events_data
+            create_event_cards(page_events, start_idx, events_data)
+
+            # Pagination controls at bottom
+            col11, col22, col33 = st.columns([1, 2, 1])
+            with col11:
+                if st.button("⬅️ Prev ", disabled=st.session_state.event_page == 0):
+                    st.session_state.event_page -= 1
+                    # Clear selection when changing pages
+                    st.session_state.selected_event = None
+                    st.session_state.edit_event_id = None
+                    st.rerun()
+            with col22:
+                st.markdown(
+                    f"<div style='text-align:center;'>Page {st.session_state.event_page+1} of {total_pages}</div>", 
+                    unsafe_allow_html=True
+                )
+            with col33:
+                if st.button("Next ➡️ ", disabled=st.session_state.event_page >= total_pages-1):
+                    st.session_state.event_page += 1
+                    # Clear selection when changing pages
+                    st.session_state.selected_event = None
+                    st.session_state.edit_event_id = None
+                    st.rerun()
+        else:
+            st.markdown("""
+            <div class="no-events">
+                <h2>🎯 Create Your First Event</h2>
+                <p>Click "Add New Event" button above to get started!</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+def show_analytics_page():
+    """Display the Analytics page"""
+    st.markdown('<div class="page-indicator">📈 Analytics Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">📈 Analytics</h1>', unsafe_allow_html=True)
+    
+    # Load chat data only when analytics page is accessed
+    try:
+        with st.spinner("Loading chat data for analytics..."):
+            chats = load_chat_data()
+    except Exception as e:
+        st.error(f"Error loading chat data: {e}")
+        chats = pd.DataFrame()
+    
+    # Check if we have chat data
+    if chats.empty:
+        st.info("No chat data available for analytics. Please ensure 'chat_logs.txt' file is present.")
+    else:
+        # Filter controls
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            min_laughs = st.slider(
+                "Minimum 😂 count per message", 1, 5, 1
+            )
+        
+        with col2:
+            start_date = st.date_input(
+                "Start date", chats["Date"].min().date()
+            )
+        
+        with col3:
+            end_date = st.date_input(
+                "End date", chats["Date"].max().date()
+            )
+        
+        with col4:
+            aggregation_period = st.selectbox(
+                "Aggregation Period", 
+                options=['W', 'D', 'M'], 
+                format_func=lambda x: {'W': 'Weekly', 'D': 'Daily', 'M': 'Monthly'}[x],
+                index=0  # Default to Weekly
+            )
+        
+        st.markdown("---")  # Add separator line
+        
+        st.markdown(
+            f"""
+            <h3>
+                Showing Data till 
+                <span style="color:#20a808;">{chats.Date.dt.date.max()}</span>
+            </h3>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        # Section 1: Laughs Analytics
+        with st.expander("😂 Laughs Analytics", expanded=True):
+            with st.spinner("Processing laughs analytics..."):
+                # Laugh analysis (if Message column exists)
+                if "Message" in chats.columns:
+                    st.subheader("😂 Laugh Analysis")
+                    pivot_laughs, laugh_stats = process_laughs_data(chats, start_date=start_date, end_date=end_date, min_laughs=min_laughs, aggregation_period=aggregation_period)
+                    
+                    if not pivot_laughs.empty:
+                        create_laugh_metric_cards(laugh_stats)
+                            
+                        # Line chart for laughs
+                        st.markdown("**Daily Laugh Trends**")
+                        chart_colors = [color_map.get(col.lower(), "#c7cdd1") for col in pivot_laughs.columns]
+                        st.line_chart(pivot_laughs, color=chart_colors)
+        
+        # Section 2: Chat Trends
+        with st.expander("💬 Chat Trends", expanded=True):
+            with st.spinner("Processing chat trends..."):
+                analyze_chat_data(chats, start_date, end_date, aggregation_period)
+
+# Main application logic
+def main():
+    """Main application logic with multi-page navigation"""
     
     # Check authentication first
     if not st.session_state.authenticated or not st.session_state.user:
@@ -1228,205 +1466,49 @@ def main():
         logout()
         return
 
-    # Lazy load chat data only when analytics tab is accessed
-    chats = pd.DataFrame()  # Initialize empty
-    
-    # User info and logout (now safe because we know user exists)
-    col1, col2 = st.columns([4, 1])
-    
-    with col1:
+    # Sidebar navigation
+    with st.sidebar:
+        st.markdown("### Navigation")
+        
+        # User info
         username = st.session_state.user.get("username", "Unknown User")
-        st.markdown(f'<div class="user-info">👋 Welcome, {username}!</div>', 
-                unsafe_allow_html=True)
-    with col2:
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); 
+                    color: white; padding: 1rem; border-radius: 10px; text-align: center; margin-bottom: 1rem;">
+            <strong>👋 Welcome, {username}!</strong>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Page selection with buttons
+        st.markdown("**Choose a page:**")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📅 Events", 
+                        type="primary" if st.session_state.current_page == 'Events' else "secondary",
+                        use_container_width=True):
+                st.session_state.current_page = 'Events'
+                st.rerun()
+        
+        with col2:
+            if st.button("📈 Analytics", 
+                        type="primary" if st.session_state.current_page == 'Analytics' else "secondary",
+                        use_container_width=True):
+                st.session_state.current_page = 'Analytics'
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Logout button
         if st.button("🚪 Logout", type="secondary", use_container_width=True):
             logout()
             return
     
-    # Main tabs
-    tab1, tab2 = st.tabs(["📅 Our Events", "📈 Analytics"])
-    
-    with tab1:
-        # Header
-    
-        st.markdown('<h1 class="main-header">📅 Our Events</h1>', unsafe_allow_html=True)
-        
-        # Action buttons
-        st.markdown('<div class="action-buttons">', unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1, 1, 1])
-        
-        with col2:  # Center the button
-            if st.button("➕ Add New Event", type="primary", use_container_width=True):
-                st.session_state.show_add_form = True
-                st.session_state.selected_event = None
-                st.session_state.edit_event_id = None
-                st.rerun()
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-       # Number of events per page
-        EVENTS_PER_PAGE = 10  
-
-        # Load events with progress indicator
-        with st.spinner("Loading events..."):
-            events_data = load_events_from_db(st.session_state.user['username'])
-
-        # Initialize pagination state
-        if "event_page" not in st.session_state:
-            st.session_state.event_page = 0
-
-        # Calculate total pages
-        total_events = len(events_data)
-        total_pages = (total_events // EVENTS_PER_PAGE) + (1 if total_events % EVENTS_PER_PAGE else 0)
-
-        # Apply pagination
-        start_idx = st.session_state.event_page * EVENTS_PER_PAGE
-        end_idx = start_idx + EVENTS_PER_PAGE
-        page_events = events_data[start_idx:end_idx]
-
-        # Show appropriate content
-        if st.session_state.show_add_form:
-            add_event_form()
-        elif st.session_state.selected_event is not None and st.session_state.selected_event < len(events_data):
-            # Back button
-            if st.button("← Back to Events", type="primary"):
-                st.session_state.selected_event = None
-                st.session_state.edit_event_id = None
-                st.rerun()
-            
-            event = events_data[st.session_state.selected_event]
-            
-            if st.session_state.edit_event_id == event['id']:
-                edit_event_form(event)
-            else:
-                display_event_details(event)
-        else:
-            # Events grid view
-            if events_data:
-                st.markdown("---")
-                st.subheader("📅 Your Events Timeline")
-                                # Pagination controls
-                col1, col2, col3 = st.columns([1, 2, 1])
-                with col1:
-                    if st.button("⬅️ Prev", disabled=st.session_state.event_page == 0):
-                        st.session_state.event_page -= 1
-                        st.rerun()
-                with col2:
-                    st.markdown(
-                        f"<div style='text-align:center;'>Page {st.session_state.event_page+1} of {total_pages}</div>", 
-                        unsafe_allow_html=True
-                    )
-                with col3:
-                    if st.button("Next ➡️", disabled=st.session_state.event_page >= total_pages-1):
-                        st.session_state.event_page += 1
-                        st.rerun()
-                
-                # Render paginated events
-                create_event_cards(page_events)
-
-                # Pagination controls
-                col11, col22, col33 = st.columns([1, 2, 1])
-                with col11:
-                    if st.button("⬅️ Prev ", disabled=st.session_state.event_page == 0):
-                        st.session_state.event_page -= 1
-                        st.rerun()
-                with col22:
-                    st.markdown(
-                        f"<div style='text-align:center;'>Page {st.session_state.event_page+1} of {total_pages}</div>", 
-                        unsafe_allow_html=True
-                    )
-                with col33:
-                    if st.button("Next ➡️ ", disabled=st.session_state.event_page >= total_pages-1):
-                        st.session_state.event_page += 1
-                        st.rerun()
-            else:
-                st.markdown("""
-                <div class="no-events">
-                    <h2>🎯 Create Your First Event</h2>
-                    <p>Click "Add New Event" button above to get started!</p>
-                </div>
-                """, unsafe_allow_html=True)
-    
-    with tab2:
-        st.markdown('<h1 class="main-header">📈 Analytics</h1>', unsafe_allow_html=True)
-        
-        # Only load chat data when analytics tab is accessed
-        if chats.empty:
-            try:
-                with st.spinner("Loading chat data for analytics..."):
-                    chats = load_chat_data()
-            except Exception as e:
-                st.error(f"Error loading chat data: {e}")
-                chats = pd.DataFrame()
-        
-        # Check if we have chat data
-        if chats.empty:
-            st.info("No chat data available for analytics. Please ensure 'chat_logs.txt' file is present.")
-        else:
-            # Sidebar-like filters (kept inline)
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                min_laughs = st.slider(
-                    "Minimum 😂 count per message", 1, 5, 1
-                )
-            
-            with col2:
-                start_date = st.date_input(
-                    "Start date", chats["Date"].min().date()
-                )
-            
-            with col3:
-                end_date = st.date_input(
-                    "End date", chats["Date"].max().date()
-                )
-            
-            with col4:
-                aggregation_period = st.selectbox(
-                    "Aggregation Period", 
-                    options=['W', 'D', 'M'], 
-                    format_func=lambda x: {'W': 'Weekly', 'D': 'Daily', 'M': 'Monthly'}[x],
-                    index=0  # Default to Weekly
-                )
-            
-            st.markdown("---")  # Add separator line
-            
-            st.markdown(
-                f"""
-                <h3>
-                    Showing Data till 
-                    <span style="color:#20a808;">{chats.Date.dt.date.max()}</span>
-                </h3>
-                """,
-                unsafe_allow_html=True
-            )
-            
-            # Section 1: Laughs Analytics
-            with st.expander("😂 Laughs Analytics", expanded=True):
-                with st.spinner("Processing laughs analytics..."):
-
-                       # Laugh analysis (if Message column exists)
-                    if "Message" in chats.columns:
-                        st.subheader("😂 Laugh Analysis")
-                        pivot_laughs, laugh_stats = process_laughs_data(chats, start_date=start_date, end_date=end_date, aggregation_period=aggregation_period)
-                        
-                        if not pivot_laughs.empty:
-                            create_laugh_metric_cards(laugh_stats)
-                                
-                            # Line chart for laughs
-                            st.markdown("**Daily Laugh Trends**")
-                            chart_colors = [color_map.get(col.lower(), "#c7cdd1") for col in pivot_laughs.columns]
-                            st.line_chart(pivot_laughs, color=chart_colors)
-            
-            # Section 2: Chat Trends
-            with st.expander("💬 Chat Trends", expanded=True):
-                with st.spinner("Processing chat trends..."):
-                    analyze_chat_data(chats, start_date, end_date, aggregation_period)
-
-            # # Performance monitoring (optional)
-            # end_time = time.time()
-            # if st.sidebar.checkbox("Show Performance", value=False):
-            #     st.sidebar.metric("Page Load Time", f"{end_time - start:.2f}s")
+    # Display the selected page
+    if st.session_state.current_page == 'Events':
+        show_events_page()
+    else:
+        show_analytics_page()
 
 # Run the main application
 if __name__ == "__main__":
