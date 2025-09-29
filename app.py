@@ -1652,7 +1652,7 @@ def main():
         with col2:
             st.markdown(f"""
             <div style="text-align: center; margin-top: 3rem;">
-                <h2 style="color: #e83e8c;">💕 Welcome Back, {st.session_state.user.get("username", "Unknown User")}!</h2>
+                <h2 style="color: #e83e8c;">Welcome Back, {st.session_state.user.get("username", "Unknown User")}!</h2>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1692,10 +1692,11 @@ def main():
 
         # Show static counter in sidebar
         st.markdown(f"""
-            <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; 
-                        text-align: center; border: 1px solid #ddd; margin-bottom: 1rem;">
-                You've known each other for  
-                <span style="font-size:1.4rem; font-weight:bold; color:#e83e8c;">
+            <div style="background: linear-gradient(135deg, #e83e8c 0%, #ff6b9d 100%); 
+                        padding: 0.8rem; border-radius: 8px; 
+                        text-align: center; margin-bottom: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <span style="color: white; font-size: 0.9rem;">You've known each other for</span><br>
+                <span style="font-size:1.4rem; font-weight:bold; color: white;">
                     {days_known} days 🤍
                 </span>
             </div>
