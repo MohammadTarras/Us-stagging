@@ -722,9 +722,16 @@ initialize_session_state()
 
 # Clean up expired sessions and check URL for session token
 check_session_from_url()
-
 def login_page():
-    """Display login page"""
+    """Display login page with animated counter on successful login"""
+    from datetime import date
+    import time
+    
+    # Hardcoded start date
+    start_date = date(2025, 6, 7) 
+    today = date.today()
+    days_known = (today - start_date).days
+    
     st.markdown('<div class="login-container">', unsafe_allow_html=True)
     st.markdown('<h1 class="login-header">🔐 Login</h1>', unsafe_allow_html=True)
     
@@ -740,6 +747,7 @@ def login_page():
                     if success:
                         st.session_state.authenticated = True
                         st.session_state.user = user
+                        st.session_state.counter_animated = False  # Set to False so animation plays
                         st.success("✅ Login successful!")
                         time.sleep(1)
                         st.rerun()
@@ -1614,11 +1622,10 @@ def show_analytics_page():
 def main():
     """Main application logic with multi-page navigation"""
     
-        # Initialize session state variables
+    # Initialize session state variables
     if 'counter_animated' not in st.session_state:
         st.session_state.counter_animated = False
     
-    # ⭐ ADD THIS: Initialize current_page to 'Events' by default
     if 'current_page' not in st.session_state:
         st.session_state.current_page = 'Events'
     
@@ -1638,6 +1645,38 @@ def main():
     today = date.today()
     days_known = (today - start_date).days
 
+    # Show welcome animation only once after login
+    if not st.session_state.counter_animated:
+        # Center the animation
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown(f"""
+            <div style="text-align: center; margin-top: 3rem;">
+                <h2 style="color: #e83e8c;">💕 Welcome Back, {st.session_state.user.get("username", "Unknown User")}!</h2>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            counter_placeholder = st.empty()
+            
+            for i in range(days_known + 1):
+                counter_placeholder.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #e83e8c 0%, #ff6b9d 100%); 
+                                color: white; padding: 2rem; border-radius: 15px; 
+                                text-align: center; margin: 2rem 0; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+                        <div style="font-size: 1.2rem; margin-bottom: 1rem; color: white;">
+                            You've known each other for
+                        </div>
+                        <div style="font-size: 3rem; font-weight: bold; color: white;">
+                            {i} days 🤍
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+                time.sleep(0.01)
+            
+            time.sleep(1.5)  # Pause to enjoy the final count
+            st.session_state.counter_animated = True
+            st.rerun()
+    
     # Sidebar navigation
     with st.sidebar:
         st.markdown("### Navigation")
@@ -1651,32 +1690,16 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-        # In your sidebar, replace the counter code with:
-        if not st.session_state.counter_animated:
-            counter_placeholder = st.empty()
-            for i in range(days_known + 1):
-                counter_placeholder.markdown(f"""
-                    <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; 
-                                text-align: center; border: 1px solid #ddd; margin-bottom: 1rem;">
-                        You've known each other for  
-                        <span style="font-size:1.4rem; font-weight:bold; color:#e83e8c;">
-                            {i} days 🤍
-                        </span>
-                    </div>
-                """, unsafe_allow_html=True)
-                time.sleep(0.01)
-            st.session_state.counter_animated = True
-        else:
-            # Just show the final count
-            st.markdown(f"""
-                <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; 
-                            text-align: center; border: 1px solid #ddd; margin-bottom: 1rem;">
-                    You've known each other for  
-                    <span style="font-size:1.4rem; font-weight:bold; color:#e83e8c;">
-                        {days_known} days 
-                    </span>
-                </div>
-            """, unsafe_allow_html=True)
+        # Show static counter in sidebar
+        st.markdown(f"""
+            <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; 
+                        text-align: center; border: 1px solid #ddd; margin-bottom: 1rem;">
+                You've known each other for  
+                <span style="font-size:1.4rem; font-weight:bold; color:#e83e8c;">
+                    {days_known} days 🤍
+                </span>
+            </div>
+        """, unsafe_allow_html=True)
                         
         # Page selection with buttons
         st.markdown("**Choose a page:**")
@@ -1700,15 +1723,14 @@ def main():
             logout()
             return
 
-    # ⭐ ADD THIS: Render the selected page
+    # Render the selected page
     if st.session_state.current_page == 'Events':
-        show_events_page()  # Your events page function
+        show_events_page()
     elif st.session_state.current_page == 'Analytics':
-        show_analytics_page()  # Your analytics page function
+        show_analytics_page()
     else:
-        # Default page if nothing is selected
         st.info("Please select a page from the sidebar")
 
-# Run the main application
+
 if __name__ == "__main__":
     main()
