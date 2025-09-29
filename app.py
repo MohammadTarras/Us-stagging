@@ -10,7 +10,9 @@ import regex
 import plotly.express as px
 import traceback
 from functools import wraps
-
+import base64
+from PIL import Image
+import io
 # Define custom colors
 color_map = {
     "shahed": "#e65e5e",
@@ -88,6 +90,67 @@ def save_session_token(username, token):
         st.error(f"Session error: Please try logging in again.")
         return False
 
+
+
+def encode_image_to_base64(uploaded_file):
+    """
+    Encode uploaded image to base64 string with compression
+    
+    Parameters:
+    - uploaded_file: Streamlit UploadedFile object
+    
+    Returns:
+    - base64 encoded string or None if error
+    """
+    try:
+        # Read image
+        image = Image.open(uploaded_file)
+        
+        # Resize if too large (max width 1200px)
+        max_width = 1200
+        if image.width > max_width:
+            ratio = max_width / image.width
+            new_size = (max_width, int(image.height * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # Convert to RGB if necessary (for PNG with transparency)
+        if image.mode in ('RGBA', 'LA', 'P'):
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            if image.mode == 'P':
+                image = image.convert('RGBA')
+            background.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+            image = background
+        
+        # Save to bytes with compression
+        buffer = io.BytesIO()
+        image.save(buffer, format='JPEG', quality=85, optimize=True)
+        buffer.seek(0)
+        
+        # Encode to base64
+        img_base64 = base64.b64encode(buffer.read()).decode()
+        return f"data:image/jpeg;base64,{img_base64}"
+    
+    except Exception as e:
+        st.error(f"Error encoding image: {str(e)}")
+        return None
+
+
+def decode_base64_to_image(base64_string):
+    """
+    Decode base64 string to display image
+    
+    Parameters:
+    - base64_string: base64 encoded image string
+    
+    Returns:
+    - decoded image data or None
+    """
+    try:
+        if base64_string and base64_string.startswith('data:image'):
+            return base64_string
+        return None
+    except Exception as e:
+        return None
 def verify_session_token(token):
     """Verify session token and return user data with optimized caching"""
     try:
@@ -156,15 +219,13 @@ def set_user_context(username):
     except Exception:
         return False
 
-@st.cache_data(ttl=120, show_spinner=False, max_entries=50)  # Longer cache for events
+@st.cache_data(ttl=120, show_spinner=False, max_entries=50)
 def load_events_from_db(username):
-    """Load events from Supabase database with optimized caching"""
+    """Load events from Supabase database with images"""
     try:
         supabase = init_supabase()
         set_user_context(username)
-        print("setted user context....")
         response = supabase.table('our_events').select('*').eq('enabled', True).order('event_date', desc=True).execute()
-        print(len(response.data))
     
         events = []
         for event in response.data:
@@ -173,7 +234,8 @@ def load_events_from_db(username):
                 'title': event['event_title'],
                 'date': datetime.strptime(event['event_date'], '%Y-%m-%d').date(),
                 'preview': event['preview_text'],
-                'description': event['description']
+                'description': event['description'],
+                'image': event.get('image_data')  # Include image data
             })
         return events
     except Exception as e:
@@ -199,18 +261,24 @@ def clear_events_cache():
     if 'event_page' in st.session_state:
         st.session_state.event_page = 0
 
-def save_event_to_db(title, event_date, preview, description, username):
-    """Save new event to Supabase database with cache invalidation"""
+def save_event_to_db(title, event_date, preview, description, username, image_base64=None):
+    """Save new event to Supabase database with optional image"""
     try:
         supabase = init_supabase()
         set_user_context(username)
         
-        response = supabase.table('our_events').insert({
+        event_data = {
             'event_title': title,
             'event_date': str(event_date),
             'preview_text': preview,
             'description': description
-        }).execute()
+        }
+        
+        # Add image if provided
+        if image_base64:
+            event_data['image_data'] = image_base64
+        
+        response = supabase.table('our_events').insert(event_data).execute()
         
         # Clear cache after successful save
         clear_events_cache()
@@ -219,18 +287,25 @@ def save_event_to_db(title, event_date, preview, description, username):
         st.error(f"Error saving event: {str(e)}")
         return False
 
-def update_event_in_db(event_id, title, event_date, preview, description, username):
-    """Update existing event in Supabase database with cache invalidation"""
+
+def update_event_in_db(event_id, title, event_date, preview, description, username, image_base64=None):
+    """Update existing event in Supabase database with optional image"""
     try:
         supabase = init_supabase()
         set_user_context(username)
         
-        response = supabase.table('our_events').update({
+        event_data = {
             'event_title': title,
             'event_date': str(event_date),
             'preview_text': preview,
             'description': description
-        }).eq('id', event_id).execute()
+        }
+        
+        # Add/update image if provided, or set to None if explicitly removed
+        if image_base64 is not None:
+            event_data['image_data'] = image_base64
+        
+        response = supabase.table('our_events').update(event_data).eq('id', event_id).execute()
         
         # Clear cache after successful update
         clear_events_cache()
@@ -238,6 +313,7 @@ def update_event_in_db(event_id, title, event_date, preview, description, userna
     except Exception as e:
         st.error(f"Error updating event: {str(e)}")
         return False
+
 
 def delete_event_from_db(event_id, username):
     """Delete event from database with cache invalidation"""
@@ -673,9 +749,8 @@ def login_page():
                 st.error("Please enter both username and password")
     
     st.markdown('</div>', unsafe_allow_html=True)
-
 def display_event_details(event):
-    """Display detailed view of selected event with Arabic text support"""
+    """Display detailed view of selected event with image and Arabic text support"""
     arabic_class = "arabic" if is_arabic_text(event["description"]) else ""
     
     st.markdown(f'''
@@ -685,6 +760,20 @@ def display_event_details(event):
             <div class="event-detail-meta">
                 📅 {event["date"].strftime("%B %d, %Y")}
             </div>
+    ''', unsafe_allow_html=True)
+    
+    # Display image if available
+    if event.get('image'):
+        st.markdown(
+            f"""
+            <div style="margin: 2rem 0; text-align: center;">
+                <img src="{event['image']}" alt="{event['title']}" style="width: 400px; max-width:100%; height:auto; display:block; margin: 0 auto;" />
+                <div style="font-size: 0.9rem; color: gray;">{event['title']}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+)
+    st.markdown(f'''
             <div class="event-description {arabic_class}">
                 {event["description"]}
             </div>
@@ -692,8 +781,10 @@ def display_event_details(event):
     </div>
     ''', unsafe_allow_html=True)
 
+
+
 def add_event_form():
-    """Display form to add new event"""
+    """Display form to add new event with image upload"""
     st.markdown('<div class="event-form">', unsafe_allow_html=True)
     st.markdown('<div class="form-header">➕ Add New Event</div>', unsafe_allow_html=True)
     
@@ -703,6 +794,17 @@ def add_event_form():
         new_preview = st.text_input("Short Preview", placeholder="Brief description for timeline...")
         new_description = st.text_area("Detailed Description", height=200, 
                                     placeholder="Full description of the event...")
+        
+        # Image upload
+        uploaded_image = st.file_uploader(
+            "Upload Image (Optional)",
+            type=['png', 'jpg', 'jpeg'],
+            help="Upload an image for this event. It will be compressed automatically."
+        )
+        
+        # Preview uploaded image
+        if uploaded_image:
+            st.image(uploaded_image, caption="Image Preview", use_container_width=True)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -715,8 +817,18 @@ def add_event_form():
         if submitted:
             if new_title and new_preview and new_description:
                 with st.spinner("Adding event..."):
-                    success = save_event_to_db(new_title, new_date, new_preview, 
-                                            new_description, st.session_state.user['username'])
+                    # Encode image if uploaded
+                    image_base64 = None
+                    if uploaded_image:
+                        image_base64 = encode_image_to_base64(uploaded_image)
+                        if image_base64 is None:
+                            st.error("Failed to process image. Event will be saved without image.")
+                    
+                    success = save_event_to_db(
+                        new_title, new_date, new_preview, 
+                        new_description, st.session_state.user['username'],
+                        image_base64
+                    )
                     if success:
                         st.success("✅ Event added successfully!")
                         st.session_state.show_add_form = False
@@ -727,8 +839,9 @@ def add_event_form():
     
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 def edit_event_form(event):
-    """Display form to edit existing event"""
+    """Display form to edit existing event with image support"""
     st.markdown('<div class="event-form">', unsafe_allow_html=True)
     st.markdown('<div class="form-header">✏️ Edit Event</div>', unsafe_allow_html=True)
     
@@ -737,6 +850,26 @@ def edit_event_form(event):
         edit_date = st.date_input("Event Date", value=event['date'])
         edit_preview = st.text_input("Short Preview", value=event['preview'])
         edit_description = st.text_area("Detailed Description", value=event['description'], height=200)
+        
+        # Show existing image if available
+        if event.get('image'):
+            st.markdown("**Current Image:**")
+            st.image(event['image'], use_container_width=True)
+            remove_image = st.checkbox("Remove current image")
+        else:
+            remove_image = False
+            st.info("No image currently attached to this event")
+        
+        # Image upload
+        uploaded_image = st.file_uploader(
+            "Upload New Image (Optional)",
+            type=['png', 'jpg', 'jpeg'],
+            help="Upload a new image to replace the existing one"
+        )
+        
+        # Preview new uploaded image
+        if uploaded_image:
+            st.image(uploaded_image, caption="New Image Preview", use_container_width=True)
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -751,8 +884,27 @@ def edit_event_form(event):
         if save_clicked:
             if edit_title and edit_preview and edit_description:
                 with st.spinner("Updating event..."):
-                    success = update_event_in_db(event['id'], edit_title, edit_date, edit_preview, 
-                                            edit_description, st.session_state.user['username'])
+                    # Determine image data to save
+                    image_base64 = None
+                    
+                    if uploaded_image:
+                        # New image uploaded
+                        image_base64 = encode_image_to_base64(uploaded_image)
+                        if image_base64 is None:
+                            st.error("Failed to process new image. Keeping existing image.")
+                            image_base64 = event.get('image')
+                    elif remove_image:
+                        # Remove existing image (set to empty string)
+                        image_base64 = ""
+                    else:
+                        # Keep existing image
+                        image_base64 = event.get('image')
+                    
+                    success = update_event_in_db(
+                        event['id'], edit_title, edit_date, edit_preview, 
+                        edit_description, st.session_state.user['username'],
+                        image_base64
+                    )
                     if success:
                         st.success("✅ Event updated successfully!")
                         st.session_state.edit_event_id = None
@@ -777,42 +929,52 @@ def edit_event_form(event):
     st.markdown('</div>', unsafe_allow_html=True)
 
 def create_event_cards(events, start_idx=0, events_data=None):
-    """Create event cards with inline edit buttons - FIXED pagination navigation"""
+    """Create event cards with small thumbnail images on the left"""
     if not events:
         return
     
-    # Use the full events_data for navigation if provided
     if events_data is None:
         events_data = events
     
     for i, event in enumerate(events):
-        # Calculate the actual global index in the full events list
         global_index = start_idx + i
         
-        # Validate event data
         if not all(key in event for key in ['title', 'date', 'preview', 'id']):
             st.error(f"Event data incomplete for event at index {global_index}")
             continue
         
-        # Format date
         try:
             formatted_date = event['date'].strftime('%B %d, %Y')
         except (AttributeError, ValueError):
             formatted_date = str(event['date'])
         
-        card_html = f'''
-        <div class="event-card">
-            <div class="card-title">{event['title']}</div>
-            <div class="card-date">📅 {formatted_date}</div>
-            <div class="card-preview">{event['preview']}</div>
-        </div>
-        '''
+        # Build card HTML with optional image
+        if event.get('image'):
+            card_html = f'''
+            <div class="event-card" style="display: flex; align-items: center; gap: 1rem;">
+                <div style="flex-shrink: 0; width: 120px; height: 120px; overflow: hidden; border-radius: 8px;">
+                    <img src="{event['image']}" style="width: 100%; height: 100%; object-fit: cover;" />
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                    <div class="card-title">{event['title']}</div>
+                    <div class="card-date">📅 {formatted_date}</div>
+                    <div class="card-preview">{event['preview']}</div>
+                </div>
+            </div>
+            '''
+        else:
+            card_html = f'''
+            <div class="event-card">
+                <div class="card-title">{event['title']}</div>
+                <div class="card-date">📅 {formatted_date}</div>
+                <div class="card-preview">{event['preview']}</div>
+            </div>
+            '''
         
         st.markdown(card_html, unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
         with col1:
-            # FIXED: Use global index for proper event access
             view_key = f"view_{event['id']}_{global_index}"
             if st.button(f"👁️ View Details", key=view_key, 
                         type="secondary", use_container_width=True):
@@ -821,7 +983,6 @@ def create_event_cards(events, start_idx=0, events_data=None):
                 st.rerun()
         
         with col2:
-            # FIXED: Use global index for proper event access
             edit_key = f"edit_{event['id']}_{global_index}"
             if st.button(f"✏️ Edit", key=edit_key, 
                         type="secondary", use_container_width=True):
@@ -830,7 +991,6 @@ def create_event_cards(events, start_idx=0, events_data=None):
                 st.rerun()
         
         st.markdown("---")
-
 @st.cache_data(ttl=60, show_spinner=False, max_entries=10)  # Cache file reading
 def read_file_lines(bucket_name: str, file_path: str):
     """Read a file from Supabase storage line by line into a list with caching"""
