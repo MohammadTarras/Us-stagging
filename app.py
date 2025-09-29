@@ -769,18 +769,51 @@ def display_event_details(event):
                 📅 {event["date"].strftime("%B %d, %Y")}
             </div>
     ''', unsafe_allow_html=True)
-    
+
+
+
     # Display image if available
     if event.get('image'):
         st.markdown(
             f"""
-            <div style="margin: 2rem 0; text-align: center;">
-                <img src="{event['image']}" alt="{event['title']}" style="width: 400px; max-width:100%; height:auto; display:block; margin: 0 auto;" />
-                <div style="font-size: 0.9rem; color: gray;">{event['title']}</div>
+            <style>
+                .event-image-container {{
+                    margin: 2rem 0;
+                    text-align: center;
+                }}
+                .event-image {{
+                    width: 400px;
+                    max-width: 100%;
+                    height: auto;
+                    display: block;
+                    margin: 0 auto;
+                    border: 3px solid #e83e8c;
+                    border-radius: 12px;
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+                    transition: all 0.3s ease;
+                    cursor: pointer;
+                }}
+                .event-image:hover {{
+                    transform: scale(1.05);
+                    box-shadow: 0 8px 16px rgba(232, 62, 140, 0.3);
+                    border-color: #ff6b9d;
+                }}
+                .event-image-caption {{
+                    font-size: 0.9rem;
+                    color: #666;
+                    margin-top: 0.5rem;
+                }}
+            </style>
+            <div class="event-image-container">
+                <img src="{event['image']}" 
+                    alt="{event['title']}" 
+                    class="event-image"
+                    onclick="window.open('{event['image']}', '_blank')" />
+                <div class="event-image-caption">{event['title']}</div>
             </div>
             """,
             unsafe_allow_html=True
-)
+        )
     st.markdown(f'''
             <div class="event-description {arabic_class}">
                 {event["description"]}
