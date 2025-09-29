@@ -91,6 +91,7 @@ def save_session_token(username, token):
         return False
 
 
+
 def encode_image_to_base64(uploaded_file):
     """
     Encode uploaded image to base64 string with compression
@@ -1610,9 +1611,16 @@ def show_analytics_page():
             with st.spinner("Processing chat trends..."):
                 analyze_chat_data(chats, start_date, end_date, aggregation_period)
 
-# Main application logic
 def main():
     """Main application logic with multi-page navigation"""
+    
+        # Initialize session state variables
+    if 'counter_animated' not in st.session_state:
+        st.session_state.counter_animated = False
+    
+    # ⭐ ADD THIS: Initialize current_page to 'Events' by default
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 'Events'
     
     # Check authentication first
     if not st.session_state.authenticated or not st.session_state.user:
@@ -1642,20 +1650,34 @@ def main():
             <strong>👋 Welcome, {username}!</strong>
         </div>
         """, unsafe_allow_html=True)
-        
-        counter_placeholder = st.empty()
-        for i in range(days_known + 1):
-            counter_placeholder.markdown(f"""
+
+        # In your sidebar, replace the counter code with:
+        if not st.session_state.counter_animated:
+            counter_placeholder = st.empty()
+            for i in range(days_known + 1):
+                counter_placeholder.markdown(f"""
+                    <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; 
+                                text-align: center; border: 1px solid #ddd; margin-bottom: 1rem;">
+                        You've known each other for  
+                        <span style="font-size:1.4rem; font-weight:bold; color:#e83e8c;">
+                            {i} days 🤍
+                        </span>
+                    </div>
+                """, unsafe_allow_html=True)
+                time.sleep(0.01)
+            st.session_state.counter_animated = True
+        else:
+            # Just show the final count
+            st.markdown(f"""
                 <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; 
                             text-align: center; border: 1px solid #ddd; margin-bottom: 1rem;">
-                    ❤️ You’ve known each other for  
+                    You've known each other for  
                     <span style="font-size:1.4rem; font-weight:bold; color:#e83e8c;">
-                        {i} days
+                        {days_known} days 
                     </span>
                 </div>
             """, unsafe_allow_html=True)
-            time.sleep(0.01)  # adjust speed (smaller = faster)
-                
+                        
         # Page selection with buttons
         st.markdown("**Choose a page:**")
         col1, col2 = st.columns(2)
@@ -1677,6 +1699,15 @@ def main():
         if st.button("🚪 Logout", type="secondary", use_container_width=True):
             logout()
             return
+
+    # ⭐ ADD THIS: Render the selected page
+    if st.session_state.current_page == 'Events':
+        show_events_page()  # Your events page function
+    elif st.session_state.current_page == 'Analytics':
+        show_analytics_page()  # Your analytics page function
+    else:
+        # Default page if nothing is selected
+        st.info("Please select a page from the sidebar")
 
 # Run the main application
 if __name__ == "__main__":
