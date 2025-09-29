@@ -91,7 +91,6 @@ def save_session_token(username, token):
         return False
 
 
-
 def encode_image_to_base64(uploaded_file):
     """
     Encode uploaded image to base64 string with compression
@@ -1626,6 +1625,11 @@ def main():
         logout()
         return
 
+    # Hardcoded start date
+    start_date = date(2025, 6, 7) 
+    today = date.today()
+    days_known = (today - start_date).days
+
     # Sidebar navigation
     with st.sidebar:
         st.markdown("### Navigation")
@@ -1639,9 +1643,21 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
+        counter_placeholder = st.empty()
+        for i in range(days_known + 1):
+            counter_placeholder.markdown(f"""
+                <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; 
+                            text-align: center; border: 1px solid #ddd; margin-bottom: 1rem;">
+                    ❤️ You’ve known each other for  
+                    <span style="font-size:1.4rem; font-weight:bold; color:#e83e8c;">
+                        {i} days
+                    </span>
+                </div>
+            """, unsafe_allow_html=True)
+            time.sleep(0.01)  # adjust speed (smaller = faster)
+                
         # Page selection with buttons
         st.markdown("**Choose a page:**")
-        
         col1, col2 = st.columns(2)
         with col1:
             if st.button("📅 Events", 
@@ -1649,7 +1665,6 @@ def main():
                         use_container_width=True):
                 st.session_state.current_page = 'Events'
                 st.rerun()
-        
         with col2:
             if st.button("📈 Analytics", 
                         type="primary" if st.session_state.current_page == 'Analytics' else "secondary",
@@ -1659,16 +1674,9 @@ def main():
         
         st.markdown("---")
         
-        # Logout button
         if st.button("🚪 Logout", type="secondary", use_container_width=True):
             logout()
             return
-    
-    # Display the selected page
-    if st.session_state.current_page == 'Events':
-        show_events_page()
-    else:
-        show_analytics_page()
 
 # Run the main application
 if __name__ == "__main__":
