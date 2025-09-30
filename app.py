@@ -1697,7 +1697,7 @@ def main():
                                 color: white; padding: 2rem; border-radius: 15px; 
                                 text-align: center; margin: 2rem 0; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
                         <div style="font-size: 1.2rem; margin-bottom: 1rem; color: white;">
-                            You've known each other for
+                            We've known each other for
                         </div>
                         <div style="font-size: 3rem; font-weight: bold; color: white;">
                             {i} days 🤍
@@ -1728,7 +1728,7 @@ def main():
             <div style="background: linear-gradient(135deg, #e83e8c 0%, #ff6b9d 100%); 
                         padding: 0.8rem; border-radius: 8px; 
                         text-align: center; margin-bottom: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <span style="color: white; font-size: 0.9rem;">You've known each other for</span><br>
+                <span style="color: white; font-size: 0.9rem;">We've known each other for</span><br>
                 <span style="font-size:1.4rem; font-weight:bold; color: white;">
                     {days_known} days 🤍
                 </span>
