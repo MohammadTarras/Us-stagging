@@ -347,7 +347,7 @@ def authenticate_user(username, password):
         supabase = init_supabase()
         
         hashed_password = hash_password(password)
-        
+
         response = supabase.table('users').select('*').eq('username', username).eq('password_hash', hashed_password).execute()
         
         if response.data and len(response.data) > 0:
@@ -895,7 +895,7 @@ def edit_event_form(event):
         # Show existing image if available
         if event.get('image'):
             st.markdown("**Current Image:**")
-            st.image(event['image'], use_container_width=True)
+            st.image(event['image'], width=300)
             remove_image = st.checkbox("Remove current image")
         else:
             remove_image = False
@@ -1593,32 +1593,20 @@ def show_analytics_page():
     if chats.empty:
         st.info("No chat data available for analytics. Please ensure 'chat_logs.txt' file is present.")
     else:
-        # Filter controls
-        col1, col2, col3, col4 = st.columns(4)
+    
+        # Get filters from session state (set by sidebar)
+        filters = st.session_state.get('analytics_filters', {
+            'min_laughs': 1,
+            'start_date': chats["Date"].min().date(),
+            'end_date': chats["Date"].max().date(),
+            'aggregation_period': 'W'
+        })
         
-        with col1:
-            min_laughs = st.slider(
-                "Minimum 😂 count per message", 1, 5, 1
-            )
-        
-        with col2:
-            start_date = st.date_input(
-                "Start date", chats["Date"].min().date()
-            )
-        
-        with col3:
-            end_date = st.date_input(
-                "End date", chats["Date"].max().date()
-            )
-        
-        with col4:
-            aggregation_period = st.selectbox(
-                "Aggregation Period", 
-                options=['W', 'D', 'M'], 
-                format_func=lambda x: {'W': 'Weekly', 'D': 'Daily', 'M': 'Monthly'}[x],
-                index=0  # Default to Weekly
-            )
-        
+        min_laughs = filters['min_laughs']
+        start_date = filters['start_date']
+        end_date = filters['end_date']
+        aggregation_period = filters['aggregation_period']
+            
         st.markdown("---")  # Add separator line
         
         st.markdown(
@@ -1750,6 +1738,48 @@ def main():
                         use_container_width=True):
                 st.session_state.current_page = 'Analytics'
                 st.rerun()
+        
+        st.markdown("---")
+        
+        # Analytics Filters (only show when on Analytics page)
+        if st.session_state.current_page == 'Analytics':
+            # Load chat data to get date ranges
+            chats = load_chat_data()
+            
+            if not chats.empty:
+                st.markdown("### 🎛️ Analytics Filters")
+                
+                min_laughs = st.slider(
+                    "Minimum 😂 count", 
+                    min_value=1, 
+                    max_value=5, 
+                    value=1
+                )
+                
+                filter_start_date = st.date_input(
+                    "Start date", 
+                    value=chats["Date"].min().date()
+                )
+                
+                filter_end_date = st.date_input(
+                    "End date", 
+                    value=chats["Date"].max().date()
+                )
+                
+                aggregation_period = st.selectbox(
+                    "Time Period", 
+                    options=['D', 'W', 'M'], 
+                    format_func=lambda x: {'W': 'Weekly', 'D': 'Daily', 'M': 'Monthly'}[x],
+                    index=1  # Default to Weekly
+                )
+                
+                # Store filters in session state
+                st.session_state.analytics_filters = {
+                    'min_laughs': min_laughs,
+                    'start_date': filter_start_date,
+                    'end_date': filter_end_date,
+                    'aggregation_period': aggregation_period
+                }
         
         st.markdown("---")
         
