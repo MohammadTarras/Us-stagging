@@ -32,6 +32,9 @@ SUPABASE_URL = "https://qvkrvidkgzscjycbmdxu.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2a3J2aWRrZ3pzY2p5Y2JtZHh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY4ODY5OTQsImV4cCI6MjA3MjQ2Mjk5NH0.HHAwIvBpxJeAJUpyI0KemV9Et1mezv5Tli-qB1n1PGI"
 SUPABASE_KEY1 = "00a23610b042abb6fd627a325568cbc86c112ca183f42a0bcc4237dd34d5e1cf"
 
+# Compile patterns once at module level (not in functions)
+WHATSAPP_PATTERN = re.compile(r'^(\d{2}/\d{2}/\d{4}, \d{2}:\d{2}) - (.*?): (.*)')
+EMOJI_PATTERN = regex.compile(r'[\p{Extended_Pictographic}]', flags=regex.UNICODE)
 # IMPROVED CACHING STRATEGIES
 
 @st.cache_resource(ttl=3600)  # Cache for 1 hour
@@ -1032,9 +1035,12 @@ def create_event_cards(events, start_idx=0, events_data=None):
                 st.rerun()
         
         st.markdown("---")
-@st.cache_data(ttl=60, show_spinner=False, max_entries=10)  # Cache file reading
+# ============================================================================
+# FILE READING (Increase cache time since chat logs don't change frequently)
+# ============================================================================
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=5)  # 1 hour cache
 def read_file_lines(bucket_name: str, file_path: str):
-    """Read a file from Supabase storage line by line into a list with caching"""
+    """Read a file from Supabase storage with extended caching"""
     try:
         supabase = init_supabase_storage()
         response = supabase.storage.from_(bucket_name).download(file_path)
@@ -1050,62 +1056,77 @@ def read_file_lines(bucket_name: str, file_path: str):
         print("❌ Error reading file:", e)
         return []
 
-@st.cache_data(ttl=60, show_spinner=False)  # Cache for 10 minutes, longer for chat processing
+# ============================================================================
+# CORE DATA LOADING (Most critical for performance)
+# ============================================================================
+@st.cache_data(ttl=3600, show_spinner=False)  # 1 hour cache
 def load_chat_data():
-    """Load and process chat data with heavy caching"""
+    """Load and process chat data with comprehensive optimization"""
     try:
         lines = read_file_lines("our_chats", "Us/chat_logs.txt")
+        
+        if not lines:
+            return pd.DataFrame()
     
-        # Prepare lists
         dates, names, messages = [], [], []
 
-        # WhatsApp message pattern: Date - Name: Message
-        pattern = re.compile(r'^(\d{2}/\d{2}/\d{4}, \d{2}:\d{2}) - (.*?): (.*)')
-
         for line in lines:
-            match = pattern.match(line)
+            match = WHATSAPP_PATTERN.match( line)
+          
             if match:
                 date, name, message = match.groups()
                 dates.append(date)
                 names.append(name)
                 messages.append(message)
             else:
-                # If the line is a continuation of the previous message
                 if messages:
                     messages[-1] += '\n' + line.strip()
 
-        # Create DataFrame
+        # Create DataFrame with datetime conversion in one step
         df = pd.DataFrame({
-            "Date": dates,
+            "Date": pd.to_datetime(dates, format='%d/%m/%Y, %H:%M'),
             "Name": names,
             "Message": messages
         })
-        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y, %H:%M')
 
-        df.loc[df['Name'] == '🕵‍♀️', 'Name'] = "Shahed"
-        df.loc[df['Name'] == 'Mohammad Al Tarras', 'Name'] = "Mohammad"
-        df['Message'] = df['Message'].str.replace(' <This message was edited>', ' ')
-        df['Word Count'] = df['Message'].apply(lambda x: len(str(x).split()))
-
-        df['View Once Images'] = df['Message'].apply(lambda x: 1 if x == "null" or x=='' else 0)
-
-        df['Message Count'] = 1
+        # Vectorized name replacements
+        df['Name'] = df['Name'].replace({
+            '🕵‍♀️': 'Shahed', 
+            'Mohammad Al Tarras': 'Mohammad'
+        })
         
-        # Count emojis in each message - optimized with cached pattern
-        emoji_pattern = get_emoji_pattern()
-        df['Emoji Count'] = df['Message'].apply(lambda x: len(emoji_pattern.findall(str(x))))
+        # Clean messages (use regex=False for literal string replacement - faster)
+        df['Message'] = df['Message'].str.replace(' <This message was edited>', '', regex=False)
+        
+        # Vectorized boolean operations
+        is_null = df['Message'].isin(['null', ''])
+        df['View Once Images'] = is_null.astype(int)
+        df['Message Count'] = (~df['Message'].eq('null')).astype(int)
+        
+        # Optimized word count - only for non-null messages
+        df['Word Count'] = 0
+        valid_mask = ~is_null
+        df.loc[valid_mask, 'Word Count'] = df.loc[valid_mask, 'Message'].str.split().str.len()
+        
 
-        df.loc[df['Message'] == "null", 'Message Count'] = 0
-        df.loc[df['Message'] == "null", 'Word Count'] = 0
+      
+        df['Emoji Count'] = df['Message'].apply(lambda x: len(EMOJI_PATTERN.findall(str(x))))
+        
+        # Pre-calculate all period columns at once
         df["WeekStart"] = df["Date"].dt.to_period("W").apply(lambda r: r.start_time)
-        
+        df["DayStart"] = df["Date"].dt.date
+        df["MonthStart"] = df["Date"].dt.to_period("M").apply(lambda r: r.start_time)
         return df
+        
     except FileNotFoundError:
         st.error("Chat logs file not found. Please upload the file to enable analytics.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Error loading chat data: {e}")
+        print("❌ Error loading chat data:", e)
+        traceback.print_exc()
         return pd.DataFrame()
+
 
 @st.cache_data(ttl=3600, show_spinner=False)  # Cache emoji pattern compilation
 def get_emoji_pattern():
@@ -1115,58 +1136,60 @@ def get_emoji_pattern():
         flags=regex.UNICODE
     )
 
-@st.cache_data(ttl=300, show_spinner=False, max_entries=20)
+# ============================================================================
+# SESSION CALCULATION (Fully vectorized)
+# ============================================================================
+@st.cache_data(ttl=600, show_spinner=False, max_entries=20)
 def calculate_chat_time(df, max_gap_minutes=3):
-    """
-    Calculate total chatting time based on consecutive message gaps with caching.
+    """Optimized chat time calculation using pure vectorized operations"""
     
-    Parameters:
-    df: DataFrame with 'Date' column containing timestamps
-    max_gap_minutes: Maximum minutes between messages to consider as continuous chat
+    if df.empty or len(df) < 2:
+        return {
+            'sessions': [],
+            'total_chat_time': timedelta(0),
+            'total_minutes': 0,
+            'total_hours': 0,
+            'total_days': 0,
+            'dataframe_with_sessions': df
+        }
     
-    Returns:
-    Dictionary with chat sessions and total time
-    """
+    # Sort once
+    df_sorted = df.sort_values('Date', ignore_index=True)
     
-    # Convert Date column to datetime if it's not already
-    df = df.copy()
-    df['Date'] = pd.to_datetime(df['Date'])
+    # Vectorized gap calculation
+    time_gaps = df_sorted['Date'].diff()
+    gap_minutes = time_gaps.dt.total_seconds() / 60
     
-    # Sort by date to ensure chronological order
-    df = df.sort_values('Date').reset_index(drop=True)
+    # Identify sessions
+    is_new_session = (gap_minutes > max_gap_minutes) | gap_minutes.isna()
+    session_ids = is_new_session.cumsum()
     
-    # Calculate time differences between consecutive messages
-    df['time_gap'] = df['Date'].diff()
+    # Add session IDs
+    df_sorted = df_sorted.copy()
+    df_sorted['session_id'] = session_ids
     
-    # Convert time gaps to minutes
-    df['gap_minutes'] = df['time_gap'].dt.total_seconds() / 60
+    # Group by session for statistics (vectorized)
+    session_stats = df_sorted.groupby('session_id')['Date'].agg(['min', 'max', 'count'])
+    session_stats = session_stats[session_stats['count'] > 1]
     
-    # Identify chat sessions (where gap is <= max_gap_minutes)
-    df['is_new_session'] = (df['gap_minutes'] > max_gap_minutes) | df['gap_minutes'].isna()
-    df['session_id'] = df['is_new_session'].cumsum()
+    # Calculate durations
+    session_stats['duration'] = session_stats['max'] - session_stats['min']
+    session_stats['duration_minutes'] = session_stats['duration'].dt.total_seconds() / 60
     
-    # Calculate session details
-    sessions = []
-    total_chat_time = timedelta(0)
+    # Build sessions list
+    sessions = [
+        {
+            'session': idx,
+            'start': row['min'],
+            'end': row['max'],
+            'duration': row['duration'],
+            'duration_minutes': row['duration_minutes'],
+            'message_count': row['count']
+        }
+        for idx, row in session_stats.iterrows()
+    ]
     
-    for session_id in df['session_id'].unique():
-        session_data = df[df['session_id'] == session_id]
-        
-        if len(session_data) > 1:  # Only count sessions with multiple messages
-            session_start = session_data['Date'].min()
-            session_end = session_data['Date'].max()
-            session_duration = session_end - session_start
-            
-            sessions.append({
-                'session': session_id,
-                'start': session_start,
-                'end': session_end,
-                'duration': session_duration,
-                'duration_minutes': session_duration.total_seconds() / 60,
-                'message_count': len(session_data)
-            })
-            
-            total_chat_time += session_duration
+    total_chat_time = session_stats['duration'].sum()
     
     return {
         'sessions': sessions,
@@ -1174,148 +1197,132 @@ def calculate_chat_time(df, max_gap_minutes=3):
         'total_minutes': total_chat_time.total_seconds() / 60,
         'total_hours': total_chat_time.total_seconds() / 3600,
         'total_days': total_chat_time.total_seconds() / 86400,
-        'dataframe_with_sessions': df
+        'dataframe_with_sessions': df_sorted
     }
 
-@st.cache_data(ttl=300, show_spinner=False, max_entries=10)
+# ============================================================================
+# DATA PROCESSING (Use pre-calculated periods)
+# ============================================================================
+@st.cache_data(ttl=600, show_spinner=False, max_entries=30)
 def process_chat_data(df, start_date=None, end_date=None, aggregation_period='W'):
-    """
-    Process chat data for visualization with caching.
-    
-    Parameters:
-    - df: DataFrame with chat data
-    - start_date: Start date for filtering (optional)
-    - end_date: End date for filtering (optional)
-    - aggregation_period: Period for aggregation ('D' for daily, 'W' for weekly, 'M' for monthly)
-    
-    Returns:
-    - processed_df: Aggregated DataFrame ready for visualization
-    - summary_stats: Dictionary with summary statistics
-    """
+    """Optimized processing using pre-calculated period columns"""
     
     if df.empty:
         return pd.DataFrame(), {}
     
-    # Ensure Date is datetime
-    df = df.copy()
-    df["Date"] = pd.to_datetime(df["Date"])
-    
-    # Apply date filters
+    # Filter by date range (avoid unnecessary copy)
+    mask = pd.Series(True, index=df.index)
     if start_date:
-        df = df[df["Date"] >= pd.to_datetime(start_date)]
+        mask &= df["Date"] >= pd.to_datetime(start_date)
     if end_date:
-        df = df[df["Date"] <= pd.to_datetime(end_date)]
+        mask &= df["Date"] <= pd.to_datetime(end_date)
     
-    # Create period column based on aggregation type
-    if aggregation_period == 'W':
-        df["Period"] = df["Date"].dt.to_period("W").apply(lambda r: r.start_time)
-        period_name = "WeekStart"
-    elif aggregation_period == 'D':
-        df["Period"] = df["Date"].dt.date
-        period_name = "Day"
-    elif aggregation_period == 'M':
-        df["Period"] = df["Date"].dt.to_period("M").apply(lambda r: r.start_time)
-        period_name = "MonthStart"
-    else:
-        raise ValueError("aggregation_period must be 'D', 'W', or 'M'")
+    filtered_df = df[mask]
     
-    # Define aggregation columns
-    agg_columns = {
-        "Message Count": "sum" if "Message Count" in df.columns else None,
-        "Word Count": "sum" if "Word Count" in df.columns else None,
-        "Emoji Count": "sum" if "Emoji Count" in df.columns else None,
-        "View Once Images": "sum" if "View Once Images" in df.columns else None
+    if filtered_df.empty:
+        return pd.DataFrame(), {}
+    
+    # Use pre-calculated period columns
+    period_map = {
+        'W': ('WeekStart', 'WeekStart'),
+        'D': ('DayStart', 'Day'),
+        'M': ('MonthStart', 'MonthStart')
     }
     
-    # Remove None values from aggregation
-    agg_columns = {k: v for k, v in agg_columns.items() if v is not None}
+    if aggregation_period not in period_map:
+        raise ValueError("aggregation_period must be 'D', 'W', or 'M'")
     
-    # Group and aggregate data
-    processed_df = df.groupby(["Period", "Name"]).agg(agg_columns).reset_index()
-    processed_df.rename(columns={"Period": period_name}, inplace=True)
+    period_col, period_name = period_map[aggregation_period]
     
-    # Calculate summary statistics
+    # Define aggregation
+    agg_dict = {
+        "Message Count": "sum",
+        "Word Count": "sum",
+        "Emoji Count": "sum",
+        "View Once Images": "sum"
+    }
+    
+    # Only include existing columns
+    agg_dict = {k: v for k, v in agg_dict.items() if k in filtered_df.columns}
+    
+    # Group and aggregate
+    processed_df = filtered_df.groupby([period_col, "Name"], as_index=False).agg(agg_dict)
+    processed_df.rename(columns={period_col: period_name}, inplace=True)
+    
+    # Calculate summary statistics efficiently
     summary_stats = {}
-    for col in agg_columns.keys():
-        if col in processed_df.columns:
-            total = processed_df[col].sum()
-            avg_per_period = processed_df.groupby("Name")[col].mean().to_dict()
-            summary_stats[col] = {
-                "total": total,
-                "average_per_person": avg_per_period,
-                "date_range": {
-                    "start": df["Date"].min(),
-                    "end": df["Date"].max()
-                }
+    for col in agg_dict.keys():
+        person_agg = processed_df.groupby("Name")[col].agg(['sum', 'mean'])
+        summary_stats[col] = {
+            "total": int(person_agg['sum'].sum()),
+            "average_per_person": person_agg['mean'].to_dict(),
+            "date_range": {
+                "start": filtered_df["Date"].min(),
+                "end": filtered_df["Date"].max()
             }
+        }
     
     return processed_df, summary_stats
 
-@st.cache_data(ttl=300, show_spinner=False, max_entries=10)
+
+# ============================================================================
+# LAUGH PROCESSING (Optimized)
+# ============================================================================
+@st.cache_data(ttl=600, show_spinner=False, max_entries=30)
 def process_laughs_data(df, min_laughs=1, start_date=None, end_date=None, aggregation_period="D"):
-    """
-    Process laugh data specifically for laugh analytics with aggregation.
-
-    Parameters:
-    - df: DataFrame with Message column
-    - min_laughs: Minimum number of laugh emojis to count as a laugh
-    - start_date: Start date for filtering
-    - end_date: End date for filtering
-    - aggregation_period: 'D' = Daily, 'W' = Weekly, 'M' = Monthly
-
-    Returns:
-    - pivot_laughs: Pivot table with aggregated laugh counts
-    - laugh_stats: Dictionary with laugh statistics
-    """
+    """Optimized laugh processing with vectorized operations"""
 
     if df.empty:
         return pd.DataFrame(), {}
 
-    df = df.copy()
-    df["Date"] = pd.to_datetime(df["Date"])
-
-    # Apply date filters
+    # Filter by date efficiently
+    mask = pd.Series(True, index=df.index)
     if start_date:
-        df = df[df["Date"].dt.date >= start_date]
+        mask &= df["Date"].dt.date >= start_date
     if end_date:
-        df = df[df["Date"].dt.date <= end_date]
+        mask &= df["Date"].dt.date <= end_date
+    
+    filtered_df = df[mask]
 
-    if df.empty:
+    if filtered_df.empty:
         return pd.DataFrame(), {}
 
-    # Count laugh emojis (1 if >= min_laughs in a message, else 0)
-    df["Laughs"] = (df["Message"].str.count("😂") >= min_laughs).astype(int)
+    # Vectorized laugh counting
+    filtered_df = filtered_df.copy()
+    filtered_df["Laughs"] = (filtered_df["Message"].str.count("😂") >= min_laughs).astype(int)
 
-    # Set datetime index for resampling
-    df = df.set_index("Date")
+    # Set index for resampling
+    filtered_df = filtered_df.set_index("Date")
 
-    # Aggregate laughs by period + person
+    # Aggregate
     grouped = (
-        df.groupby("Name")
+        filtered_df.groupby("Name")
         .resample(aggregation_period)["Laughs"]
         .sum()
         .reset_index()
     )
 
-    # Pivot for wide format
+    # Pivot
     pivot_laughs = grouped.pivot_table(
         index="Date", columns="Name", values="Laughs", fill_value=0
     )
 
     # Calculate statistics
-    laugh_stats = {}
-    for name in pivot_laughs.columns:
-        avg_laughs = pivot_laughs[name].mean()
-        total_laughs = pivot_laughs[name].sum()
-        laugh_stats[name.lower()] = {
-            "average": avg_laughs,
-            "total": total_laughs,
+    laugh_stats = {
+        name.lower(): {
+            "average": float(pivot_laughs[name].mean()),
+            "total": int(pivot_laughs[name].sum()),
         }
+        for name in pivot_laughs.columns
+    }
 
     return pivot_laughs, laugh_stats
 
+# ============================================================================
+# VISUALIZATION FUNCTIONS (Optimized with caching)
+# ============================================================================
 def create_laugh_metric_cards(laugh_stats):
-    """Create metric cards specifically for laugh data - optimized"""
+    """Display laugh metrics - lightweight, no caching needed"""
     if not laugh_stats:
         st.warning("No laugh data available")
         return
@@ -1326,82 +1333,90 @@ def create_laugh_metric_cards(laugh_stats):
     for i, person in enumerate(people):
         stats = laugh_stats[person]
         person_color = color_map.get(person.lower(), "#c7cdd1")
-        person_name = "SHAHED" if person.lower() == "shahed" else person.upper()
+        person_name = person.upper()
         
         with cols[i]:
             st.metric(
-            label=f"Avg. Laughs - {person_name}",
-            value=f"{stats['average']:.1f}",
-            help=f"Total laughs: {stats['total']}"
-        )
+                label=f"Avg. Laughs - {person_name}",
+                value=f"{stats['average']:.1f}",
+                help=f"Total laughs: {stats['total']}"
+            )
 
-@st.cache_data(ttl=300, show_spinner=False)
+
+@st.cache_data(ttl=600, show_spinner=False)
 def create_trend_visualizations(processed_df, period_column="WeekStart"):
-    """Create trend line charts for all metrics with caching"""
+    """Create trend visualizations with figure caching"""
     
     if processed_df.empty:
+        return None
+    
+    # Get metrics
+    metrics = [col for col in processed_df.columns if col not in ["Name", period_column]]
+    
+    # Create figures and store them
+    figures = []
+    
+    for metric in metrics:
+        fig = px.line(
+            processed_df,
+            x=period_column,
+            y=metric,
+            color="Name",
+            markers=True,
+            color_discrete_map={n: color_map.get(n.lower(), "#c7cdd1") for n in processed_df["Name"].unique()},
+            title=f"{metric} Trend"
+        )
+        
+        fig.update_layout(
+            xaxis_title="Time Period",
+            yaxis_title=metric,
+            title_font=dict(size=16, family="Calibri", color="#2c2c2c"),
+            font=dict(family="Calibri", size=12, color="#2c2c2c"),
+            legend=dict(
+                title=None,
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            margin=dict(l=40, r=20, t=60, b=40),
+            height=400
+        )
+        
+        if "Images" in metric:
+            fig.update_yaxes(tickformat=",.0f")
+        else:
+            fig.update_yaxes(tickformat=",~s")
+        
+        figures.append((metric, fig))
+    
+    return figures
+
+def display_trend_visualizations(figures):
+    """Display pre-generated figures in a 2-column layout"""
+    if not figures:
         st.warning("No data available for visualization")
         return
     
-    # Get available metrics (exclude Name and period columns)
-    metrics = [col for col in processed_df.columns if col not in ["Name", period_column]]
-    
-    # Create 2x2 layout
     cols = st.columns(2)
-    
-    for i, metric in enumerate(metrics):
-        col = cols[i % 2]  # Alternate between left and right columns
-        
-        with col:
-            fig = px.line(
-                processed_df,
-                x=period_column,
-                y=metric,
-                color="Name",
-                markers=True,
-                color_discrete_map={n: color_map.get(n.lower(), "#c7cdd1") for n in processed_df["Name"].unique()},
-                title=f"{metric} Trend"
-            )
-            
-            # Format the chart
-            fig.update_layout(
-                xaxis_title="Time Period" if i >= 2 else None,
-                yaxis_title=metric,
-                title_font=dict(size=16, family="Calibri", color="#2c2c2c"),
-                font=dict(family="Calibri", size=12, color="#2c2c2c"),
-                legend=dict(
-                    title=None,
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                ),
-                margin=dict(l=40, r=20, t=60, b=40),
-                height=400
-            )
-            
-            # Format Y-axis
-            if "Images" in metric:
-                fig.update_yaxes(tickformat=",.0f")
-            else:
-                fig.update_yaxes(tickformat=",~s")  # 1k, 2k formatting
-            
-            st.plotly_chart(fig, use_container_width=True)
-def create_metric_cards(summary_stats):
-    """Create and display metric cards horizontally"""
+    for i, (metric, fig) in enumerate(figures):
+        with cols[i % 2]:
+            st.plotly_chart(fig, use_container_width=True, key=f"trend_{metric}")
 
+
+def create_metric_cards(summary_stats):
+    """Display summary metric cards"""
     if not summary_stats:
         st.warning("No data available")
         return
 
-    # Build metrics list (you already have totals only)
     metrics_data = [
         ("Total Messages", summary_stats["Message Count"]["total"], "💬"),
         ("Total Words", summary_stats["Word Count"]["total"], "📝"),
         ("Total Emojis", summary_stats["Emoji Count"]["total"], "😀"),
     ]
-    # Create one row with N columns
+    
     cols = st.columns(len(metrics_data), gap="small")
 
     for col, (title, value, icon) in zip(cols, metrics_data):
@@ -1411,39 +1426,33 @@ def create_metric_cards(summary_stats):
                 value=f"{value:,}",
                 help=f"Total {title.lower()} in the selected time period"
             )
-        
 
 def analyze_chat_data(df, start_date=None, end_date=None, aggregation_period=None):
-    """
-    Complete analysis workflow combining data processing and visualization - optimized.
+    """Complete analysis workflow - optimized"""
     
-    Parameters:
-    - df: Raw chat DataFrame
-    - start_date: Start date for analysis
-    - end_date: End date for analysis
-    """
-    
-    # Process the data
     processed_df, summary_stats = process_chat_data(df, start_date, end_date, aggregation_period)
     
     if processed_df.empty:
         st.error("No data available for the selected date range")
         return
     
-    # Create metric cards for different metrics
+    # Metrics
     st.subheader("📊 Key Metrics")
     create_metric_cards(summary_stats)
     
-    # Create trend visualizations
+    # Trends
     st.subheader("📈 Trends Over Time")
-    if aggregation_period == 'W':
-        aggregation_period1 = 'WeekStart'
-    elif aggregation_period == 'D':
-        aggregation_period1 = 'Day'
-    elif aggregation_period == 'M':
-        aggregation_period1 = 'MonthStart'
     
-    create_trend_visualizations(processed_df, aggregation_period1)
+    period_name_map = {'W': 'WeekStart', 'D': 'Day', 'M': 'MonthStart'}
+    period_name = period_name_map.get(aggregation_period, 'WeekStart')
+    
+    # Generate figures (cached)
+    figures = create_trend_visualizations(processed_df, period_name)
+    
+    # Display figures
+    display_trend_visualizations(figures)
+
+
 
 # Page navigation functions
 def show_events_page():
@@ -1576,69 +1585,68 @@ def show_events_page():
             </div>
             """, unsafe_allow_html=True)
 
+# ============================================================================
+# PAGE FUNCTIONS (Keep analytics loading lazy)
+# ============================================================================
 def show_analytics_page():
-    """Display the Analytics page"""
+    """Display Analytics page with lazy loading"""
     st.markdown('<div class="page-indicator">📈 Analytics Dashboard</div>', unsafe_allow_html=True)
     st.markdown('<h1 class="main-header">📈 Analytics</h1>', unsafe_allow_html=True)
     
-    # Load chat data only when analytics page is accessed
-    try:
-        with st.spinner("Loading chat data for analytics..."):
-            chats = load_chat_data()
-    except Exception as e:
-        st.error(f"Error loading chat data: {e}")
-        chats = pd.DataFrame()
+    # Load chat data ONCE per session
+    if 'chat_data' not in st.session_state:
+        try:
+            with st.spinner("Loading chat data..."):
+                st.session_state.chat_data = load_chat_data()
+                print("✅ Chat data loaded successfully")
+                print(st.session_state.chat_data.head())
+        except Exception as e:
+            st.error(f"Error loading chat data: {e}")
+            st.session_state.chat_data = pd.DataFrame()
     
-    # Check if we have chat data
+    chats = st.session_state.chat_data
+    
     if chats.empty:
-        st.info("No chat data available for analytics. Please ensure 'chat_logs.txt' file is present.")
-    else:
+        st.info("No chat data available for analytics.")
+        return
     
-        # Get filters from session state (set by sidebar)
-        filters = st.session_state.get('analytics_filters', {
-            'min_laughs': 1,
-            'start_date': chats["Date"].min().date(),
-            'end_date': chats["Date"].max().date(),
-            'aggregation_period': 'W'
-        })
-        
-        min_laughs = filters['min_laughs']
-        start_date = filters['start_date']
-        end_date = filters['end_date']
-        aggregation_period = filters['aggregation_period']
+    # Get filters
+    filters = st.session_state.get('analytics_filters', {
+        'min_laughs': 1,
+        'start_date': chats["Date"].min().date(),
+        'end_date': chats["Date"].max().date(),
+        'aggregation_period': 'W'
+    })
+    
+    min_laughs = filters['min_laughs']
+    start_date = filters['start_date']
+    end_date = filters['end_date']
+    aggregation_period = filters['aggregation_period']
+    
+    st.markdown("---")
+    st.markdown(
+        f"""<h3>Showing Data till <span style="color:#20a808;">{chats.Date.dt.date.max()}</span></h3>""",
+        unsafe_allow_html=True
+    )
+    
+    # Laughs section
+    with st.expander("😂 Laughs Analytics", expanded=True):
+        if "Message" in chats.columns:
+            st.subheader("😂 Laugh Analysis")
+            pivot_laughs, laugh_stats = process_laughs_data(
+                chats, start_date=start_date, end_date=end_date, 
+                min_laughs=min_laughs, aggregation_period=aggregation_period
+            )
             
-        st.markdown("---")  # Add separator line
-        
-        st.markdown(
-            f"""
-            <h3>
-                Showing Data till 
-                <span style="color:#20a808;">{chats.Date.dt.date.max()}</span>
-            </h3>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        # Section 1: Laughs Analytics
-        with st.expander("😂 Laughs Analytics", expanded=True):
-            with st.spinner("Processing laughs analytics..."):
-                # Laugh analysis (if Message column exists)
-                if "Message" in chats.columns:
-                    st.subheader("😂 Laugh Analysis")
-                    pivot_laughs, laugh_stats = process_laughs_data(chats, start_date=start_date, end_date=end_date, min_laughs=min_laughs, aggregation_period=aggregation_period)
-                    
-                    if not pivot_laughs.empty:
-                        create_laugh_metric_cards(laugh_stats)
-                            
-                        # Line chart for laughs
-                        st.markdown("**Daily Laugh Trends**")
-                        chart_colors = [color_map.get(col.lower(), "#c7cdd1") for col in pivot_laughs.columns]
-                        st.line_chart(pivot_laughs, color=chart_colors)
-        
-        # Section 2: Chat Trends
-        with st.expander("💬 Chat Trends", expanded=True):
-            with st.spinner("Processing chat trends..."):
-                analyze_chat_data(chats, start_date, end_date, aggregation_period)
+            if not pivot_laughs.empty:
+                create_laugh_metric_cards(laugh_stats)
+                st.markdown("**Daily Laugh Trends**")
+                chart_colors = [color_map.get(col.lower(), "#c7cdd1") for col in pivot_laughs.columns]
+                st.line_chart(pivot_laughs, color=chart_colors)
+    
+    # Chat trends section
+    with st.expander("💬 Chat Trends", expanded=True):
+        analyze_chat_data(chats, start_date, end_date, aggregation_period)
 
 def main():
     """Main application logic with multi-page navigation"""
